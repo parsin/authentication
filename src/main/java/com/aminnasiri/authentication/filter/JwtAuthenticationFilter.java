@@ -2,40 +2,54 @@ package com.aminnasiri.authentication.filter;
 
 import com.aminnasiri.authentication.util.JwtUtils;
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtException;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
-import jakarta.servlet.ServletRequest;
-import jakarta.servlet.ServletResponse;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.web.filter.GenericFilterBean;
+import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.ArrayList;
 
-public class JwtAuthenticationFilter extends GenericFilterBean {
+@RequiredArgsConstructor
+public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtUtils jwtUtils;
 
-    public JwtAuthenticationFilter(JwtUtils jwtUtils) {
-        this.jwtUtils = jwtUtils;
-    }
-
     @Override
-    public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain) throws IOException, ServletException {
-        HttpServletRequest httpRequest = (HttpServletRequest) request;
-        String header = httpRequest.getHeader("Authorization");
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+            throws ServletException, IOException {
+
+        String header = request.getHeader("Authorization");
 
         if (header != null && header.startsWith("Bearer ")) {
             String token = header.substring(7);
-            if (!jwtUtils.isTokenExpired(token)) {
-                Claims claims = jwtUtils.getClaims(token);
-                UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
-                        claims.getSubject(), null, null);
-                SecurityContextHolder.getContext().setAuthentication(authentication);
+
+            try {
+                // If token is valid, set authentication in context
+                if (jwtUtils.isAccessTokenValid(token)) {
+                    String username = jwtUtils.getClaimFromToken(token, Claims::getSubject);
+                    UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
+                            username, null, new ArrayList<>());
+                    SecurityContextHolder.getContext().setAuthentication(authentication);
+                } else {
+                    // Token expired, clear authentication context
+                    SecurityContextHolder.clearContext();
+                }
+            } catch (JwtException | IllegalArgumentException e) {
+                // If token is invalid (malformed or signature is wrong), clear authentication context
+                SecurityContextHolder.clearContext();
             }
+        } else {
+            // No token in header, clear context
+            SecurityContextHolder.clearContext();
         }
 
-        chain.doFilter(request, response);
+        // Continue with filter chain
+        filterChain.doFilter(request, response);
     }
 }
